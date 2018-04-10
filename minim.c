@@ -20,12 +20,12 @@
 
 #ifndef BSD
 /* Ported versions of BSD helper functions. */
-void err(int eval, const char *fmt, ...);
-void errx(int eval, const char *fmt, ...);
-void warn(const char *fmt, ...);
-void warnx(const char *fmt, ...);
-void vwarn(const char *fmt, va_list args);
-void vwarnx(const char *fmt, va_list args);
+static void err(int eval, const char *fmt, ...);
+static void errx(int eval, const char *fmt, ...);
+static void warn(const char *fmt, ...);
+static void warnx(const char *fmt, ...);
+static void vwarn(const char *fmt, va_list args);
+static void vwarnx(const char *fmt, va_list args);
 #else
 #include <err.h>
 #endif
@@ -51,7 +51,7 @@ progerr(size_t pc, char ch)
 }
 
 /* Memory helpers. */
-void *xrealloc(void *buf, size_t sz);
+static void *xrealloc(void *buf, size_t sz);
 
 struct prog {
 	char *data;
@@ -59,7 +59,7 @@ struct prog {
 };
 
 /* Read all data from the given input FILE. */
-int prog_read(struct prog *prog, FILE *file);
+static int prog_read(struct prog *prog, FILE *file);
 
 struct stack {
 	uint8_t *data;
@@ -67,10 +67,10 @@ struct stack {
 	size_t cap;
 };
 
-int stack_peek(struct stack *stack, uint8_t *ret);
-int stack_pop(struct stack *stack, uint8_t *ret);
-int stack_pop2(struct stack *stack, uint8_t *upper, uint8_t *lower);
-void stack_push(struct stack *stack, uint8_t val);
+static int stack_peek(struct stack *stack, uint8_t *ret);
+static int stack_pop(struct stack *stack, uint8_t *ret);
+static int stack_pop2(struct stack *stack, uint8_t *upper, uint8_t *lower);
+static void stack_push(struct stack *stack, uint8_t val);
 
 struct call_stack {
 	size_t *data;
@@ -78,29 +78,50 @@ struct call_stack {
 	size_t cap;
 };
 
-int call_stack_pop(struct call_stack *stack, size_t *ret);
-void call_stack_push(struct call_stack *stack, size_t val);
+static int call_stack_pop(struct call_stack *stack, size_t *ret);
+static void call_stack_push(struct call_stack *stack, size_t val);
 
 /*
  * Analogous to memchr(3), but finds the close delimiter matching the open
  * delimiter that is assumed to appear in the memory buffer just before the
  * given pointer.
  */
-void *memdelim(const void *buf, int open, int close, size_t len);
+static void *memdelim(const void *buf, int open, int close, size_t len);
 
-int run(struct prog prog, uint8_t eof);
+/*
+ * Process a numeric literal, with the program counter on the start of the
+ * literal.
+ */
+static void numlit(void);
+/*
+ * Execute a single instruction.
+ */
+static void step(void);
+/*
+ * Same as numlit, but for string literals.
+ */
+static void strlit(void);
+
+/* Interpreter state. */
+static uint8_t regs[N_REGS];
+static struct stack stacks[N_STACKS];
+static size_t stack; /* Current stack. */
+static struct call_stack squares, curlies;
+static size_t pc; /* Program counter. */
+static struct prog prog;
+
+/* Interpreter options. */
+static uint8_t eof;
 
 int
 main(int argc, char **argv)
 {
-	struct prog prog;
 	FILE *input;
 	int opt;
-	uint8_t eof = 0;
 
 	progname = argv[0];
-	memset(&prog, 0, sizeof prog);
 
+	eof = 0;
 	while ((opt = getopt(argc, argv, "e:")) != -1) {
 		unsigned long num;
 		char *numend;
@@ -137,238 +158,234 @@ main(int argc, char **argv)
 	if (input != stdin)
 		fclose(input);
 
-	return run(prog, eof);
-}
+	while (pc < prog.len)
+		step();
 
-int
-run(struct prog prog, uint8_t eof)
-{
-	uint8_t regs[N_REGS] = {0};
-	struct stack stacks[N_STACKS];
-	size_t stack; /* Current stack. */
-	struct call_stack squares, curlies;
-	size_t pc; /* Program counter. */
-
-	memset(&stacks, 0, sizeof stacks);
-	memset(&squares, 0, sizeof squares);
-	memset(&curlies, 0, sizeof curlies);
-
-	stack = 0;
-	pc = 0;
-	while (pc < prog.len) {
-		char ch = prog.data[pc];
-		uint8_t arg0, arg1;
-		size_t new_pc = pc + 1;
-
-		if (isdigit(ch)) {
-			stack_push(&stacks[stack], ch - '0');
-			goto CONTINUE_PROGRAM;
-		} else if (isalpha(ch)) {
-			stack_push(&stacks[stack], ch);
-			goto CONTINUE_PROGRAM;
-		}
-
-		switch (ch) {
-		/* Arithmetic operators. */
-		case '+':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 + arg1);
-			break;
-		case '-':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 - arg1);
-			break;
-		case '*':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 * arg1);
-			break;
-		case '/':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 / arg1);
-			break;
-		case '%':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 % arg1);
-			break;
-		case '&':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 & arg1);
-			break;
-		case '|':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 | arg1);
-			break;
-		case '^':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0 ^ arg1);
-			break;
-
-		/* Stack control operators. */
-		case '_':
-			if (stack_pop(&stacks[stack], NULL))
-				progerr(pc, ch);
-			break;
-		case '#':
-			if (stack_peek(&stacks[stack], &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg0);
-			break;
-		case '@':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], arg1);
-			stack_push(&stacks[stack], arg0);
-			break;
-		case '>':
-			stack = (stack + 1) % N_STACKS;
-			break;
-		case '<':
-			stack = (stack + N_STACKS - 1) % N_STACKS;
-			break;
-
-		/* I/O operators. */
-		case '.':
-			if (stack_pop(&stacks[stack], &arg0))
-				progerr(pc, ch);
-			putchar(arg0);
-			break;
-		case ',': {
-			int ch;
-			/*
-			 * By clearing the EOF indicator here, we guarantee
-			 * portable behavior when new data is input on stdin
-			 * after reaching EOF (e.g. the user pressed Ctrl+D,
-			 * the Minim program didn't handle it, and then the
-			 * user typed something else).  It appears that some
-			 * implementations (including GNU/Linux) will return
-			 * this new data with getchar(3) even if the EOF
-			 * indicator is still set, but this may not be entirely
-			 * portable (https://stackoverflow.com/a/4753925 seems
-			 * to indicate that this behavior actually contradicts
-			 * the standard, but I haven't been able to verify
-			 * this).
-			 */
-			if (feof(stdin))
-				clearerr(stdin);
-			ch = getchar();
-			stack_push(&stacks[stack], ch == EOF ? eof : ch);
-		} break;
-		case ';':
-			if (stack_pop(&stacks[stack], &arg0))
-				progerr(pc, ch);
-			printf("%u ", arg0);
-			break;
-
-		/* Loop control operators. */
-		case '[':
-			if (stack_peek(&stacks[stack], &arg0))
-				progerr(pc, ch);
-			if (arg0 == 0) {
-				char *close = memdelim(prog.data + pc + 1, '[',
-				    ']', prog.len - pc - 1);
-				if (!close)
-					errx(1,
-					    "'[' without matching ']' (position %zu)",
-					    pc);
-				new_pc = close - prog.data + 1;
-			} else {
-				call_stack_push(&squares, pc);
-			}
-			break;
-		case ']': {
-			size_t start;
-			if (call_stack_pop(&squares, &start))
-				errx(1,
-				    "']' without matching '[' (position %zu)",
-				    pc);
-			new_pc = start;
-		} break;
-		case '{':
-			if (stacks[stack].len == 0) {
-				char *close = memdelim(prog.data + pc + 1, '{',
-				    '}', prog.len - pc - 1);
-				if (!close)
-					errx(1, "'{' without matching '}' "
-					        "(position %zu)",
-					    pc);
-				new_pc = close - prog.data + 1;
-			} else {
-				call_stack_push(&curlies, pc);
-			}
-			break;
-		case '}': {
-			size_t start;
-			if (call_stack_pop(&curlies, &start))
-				errx(1,
-				    "'}' without matching '{' (position %zu)",
-				    pc);
-			new_pc = start;
-		} break;
-
-		/* Register operators. */
-		case '=':
-			if (stack_pop2(&stacks[stack], &arg1, &arg0))
-				progerr(pc, ch);
-			regs[arg0 % N_REGS] = arg1;
-			break;
-		case '$':
-			if (stack_pop(&stacks[stack], &arg0))
-				progerr(pc, ch);
-			stack_push(&stacks[stack], regs[arg0 % N_REGS]);
-			break;
-
-		/* Literals. */
-		case '"': {
-			/* First character after the '"'. */
-			const char *start = prog.data + pc + 1;
-			const char *end = memchr(start, '"', prog.len - pc - 1);
-			if (!end)
-				errx(1,
-				    "unclosed string literal (position %zu)",
-				    pc);
-			new_pc = end - prog.data + 1;
-			while (--end >= start)
-				stack_push(&stacks[stack], *end);
-		} break;
-		case '\'': {
-			uint8_t n = 0;
-			for (size_t i = pc + 1; i < prog.len; i++)
-				if (prog.data[i] == '\'') {
-					stack_push(&stacks[stack], n);
-					new_pc = i + 1;
-					goto CONTINUE_PROGRAM;
-				} else if (isdigit(prog.data[i])) {
-					n = 10 * n + (prog.data[i] - '0');
-				} else {
-					errx(1,
-					    "unexpected character '%c' in numeric literal (position %zu)",
-					    prog.data[i], pc);
-				}
-			errx(1, "unclosed numeric literal (position %zu)", pc);
-		} break;
-		}
-
-	CONTINUE_PROGRAM:
-		pc = new_pc;
-	}
-
-	/*
-	 * The stack and program are intentionally not freed here, because it
-	 * is unnecessary to do so (the operating system will reclaim the
-	 * memory).
-	 */
 	exit(0);
 }
 
-void
+static void
+numlit(void)
+{
+	uint8_t n = 0;
+	for (size_t i = pc + 1; i < prog.len; i++)
+		if (prog.data[i] == '\'') {
+			stack_push(&stacks[stack], n);
+			pc = i + 1;
+			return;
+		} else if (isdigit(prog.data[i])) {
+			n = 10 * n + (prog.data[i] - '0');
+		} else {
+			errx(1,
+			    "unexpected character '%c' in numeric literal (position %zu)",
+			    prog.data[i], i);
+		}
+	errx(1, "unclosed numeric literal (position %zu)", pc);
+}
+
+static void
+step(void)
+{
+	char ch = prog.data[pc];
+	uint8_t arg0, arg1;
+
+	if (isdigit(ch)) {
+		stack_push(&stacks[stack], ch - '0');
+		return;
+	} else if (isalpha(ch)) {
+		stack_push(&stacks[stack], ch);
+		return;
+	}
+
+	switch (ch) {
+	/* Arithmetic operators. */
+	case '+':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 + arg1);
+		break;
+	case '-':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 - arg1);
+		break;
+	case '*':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 * arg1);
+		break;
+	case '/':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 / arg1);
+		break;
+	case '%':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 % arg1);
+		break;
+	case '&':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 & arg1);
+		break;
+	case '|':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 | arg1);
+		break;
+	case '^':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0 ^ arg1);
+		break;
+
+	/* Stack control operators. */
+	case '_':
+		if (stack_pop(&stacks[stack], NULL))
+			progerr(pc, ch);
+		break;
+	case '#':
+		if (stack_peek(&stacks[stack], &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg0);
+		break;
+	case '@':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], arg1);
+		stack_push(&stacks[stack], arg0);
+		break;
+	case '>':
+		stack = (stack + 1) % N_STACKS;
+		break;
+	case '<':
+		stack = (stack + N_STACKS - 1) % N_STACKS;
+		break;
+
+	/* I/O operators. */
+	case '.':
+		if (stack_pop(&stacks[stack], &arg0))
+			progerr(pc, ch);
+		putchar(arg0);
+		break;
+	case ',': {
+		int ch;
+		/*
+		 * By clearing the EOF indicator here, we guarantee
+		 * portable behavior when new data is input on stdin
+		 * after reaching EOF (e.g. the user pressed Ctrl+D,
+		 * the Minim program didn't handle it, and then the
+		 * user typed something else).  It appears that some
+		 * implementations (including GNU/Linux) will return
+		 * this new data with getchar(3) even if the EOF
+		 * indicator is still set, but this may not be entirely
+		 * portable (https://stackoverflow.com/a/4753925 seems
+		 * to indicate that this behavior actually contradicts
+		 * the standard, but I haven't been able to verify
+		 * this).
+		 */
+		if (feof(stdin))
+			clearerr(stdin);
+		ch = getchar();
+		stack_push(&stacks[stack], ch == EOF ? eof : ch);
+	} break;
+	case ';':
+		if (stack_pop(&stacks[stack], &arg0))
+			progerr(pc, ch);
+		printf("%u ", arg0);
+		break;
+
+	/* Loop control operators. */
+	case '[':
+		if (stack_peek(&stacks[stack], &arg0))
+			progerr(pc, ch);
+		if (arg0 == 0) {
+			char *close = memdelim(prog.data + pc + 1, '[', ']',
+			    prog.len - pc - 1);
+			if (!close)
+				errx(1,
+				    "'[' without matching ']' (position %zu)",
+				    pc);
+			pc = close - prog.data + 1;
+			return;
+		} else {
+			call_stack_push(&squares, pc);
+		}
+		break;
+	case ']': {
+		size_t start;
+		if (call_stack_pop(&squares, &start))
+			errx(1,
+			    "']' without matching '[' (position %zu)",
+			    pc);
+		pc = start;
+		return;
+	} break;
+	case '{':
+		if (stacks[stack].len == 0) {
+			char *close = memdelim(prog.data + pc + 1, '{',
+			    '}', prog.len - pc - 1);
+			if (!close)
+				errx(1,
+				    "'{' without matching '}' (position %zu)",
+				    pc);
+			pc = close - prog.data + 1;
+			return;
+		} else {
+			call_stack_push(&curlies, pc);
+		}
+		break;
+	case '}': {
+		size_t start;
+		if (call_stack_pop(&curlies, &start))
+			errx(1,
+			    "'}' without matching '{' (position %zu)",
+			    pc);
+		pc = start;
+		return;
+	} break;
+
+	/* Register operators. */
+	case '=':
+		if (stack_pop2(&stacks[stack], &arg1, &arg0))
+			progerr(pc, ch);
+		regs[arg0 % N_REGS] = arg1;
+		break;
+	case '$':
+		if (stack_pop(&stacks[stack], &arg0))
+			progerr(pc, ch);
+		stack_push(&stacks[stack], regs[arg0 % N_REGS]);
+		break;
+
+	/* Literals. */
+	case '"':
+		strlit();
+		return;
+	case '\'':
+		numlit();
+		return;
+	}
+
+	pc += 1;
+}
+
+static void
+strlit(void)
+{
+	/* First character after the '"'. */
+	const char *start = prog.data + pc + 1;
+	const char *end = memchr(start, '"', prog.len - pc - 1);
+	if (!end)
+		errx(1,
+		    "unclosed string literal (position %zu)",
+		    pc);
+	pc = end - prog.data + 1;
+	while (--end >= start)
+		stack_push(&stacks[stack], *end);
+}
+
+static void
 *xrealloc(void *buf, size_t sz)
 {
 	void *new;
@@ -377,7 +394,7 @@ void
 	return new;
 }
 
-int
+static int
 prog_read(struct prog *prog, FILE *file)
 {
 	for (;;) {
@@ -397,7 +414,7 @@ prog_read(struct prog *prog, FILE *file)
 	}
 }
 
-int
+static int
 stack_peek(struct stack *stack, uint8_t *ret)
 {
 	if (stack->len == 0) {
@@ -409,7 +426,7 @@ stack_peek(struct stack *stack, uint8_t *ret)
 	return 0;
 }
 
-int
+static int
 stack_pop(struct stack *stack, uint8_t *ret)
 {
 	if (stack->len == 0) {
@@ -422,13 +439,13 @@ stack_pop(struct stack *stack, uint8_t *ret)
 	return 0;
 }
 
-int
+static int
 stack_pop2(struct stack *stack, uint8_t *upper, uint8_t *lower)
 {
 	return stack_pop(stack, upper) || stack_pop(stack, lower);
 }
 
-void
+static void
 stack_push(struct stack *stack, uint8_t val)
 {
 	if (stack->len == stack->cap) {
@@ -438,7 +455,7 @@ stack_push(struct stack *stack, uint8_t val)
 	stack->data[stack->len++] = val;
 }
 
-int
+static int
 call_stack_pop(struct call_stack *stack, size_t *ret)
 {
 	if (stack->len == 0) {
@@ -451,7 +468,7 @@ call_stack_pop(struct call_stack *stack, size_t *ret)
 	return 0;
 }
 
-void
+static void
 call_stack_push(struct call_stack *stack, size_t val)
 {
 	if (stack->len == stack->cap) {
@@ -461,7 +478,7 @@ call_stack_push(struct call_stack *stack, size_t val)
 	stack->data[stack->len++] = val;
 }
 
-void
+static void
 *memdelim(const void *buf, int open, int close, size_t len)
 {
 	const unsigned char *b = buf;
@@ -483,7 +500,7 @@ void
 #ifndef BSD
 /* BSD helper function definitions. */
 
-void
+static void
 err(int eval, const char *fmt, ...)
 {
 	va_list args;
@@ -493,7 +510,7 @@ err(int eval, const char *fmt, ...)
 	exit(eval);
 }
 
-void
+static void
 errx(int eval, const char *fmt, ...)
 {
 	va_list args;
@@ -503,7 +520,7 @@ errx(int eval, const char *fmt, ...)
 	exit(eval);
 }
 
-void
+static void
 warn(const char *fmt, ...)
 {
 	va_list args;
@@ -512,7 +529,7 @@ warn(const char *fmt, ...)
 	va_end(args);
 }
 
-void
+static void
 warnx(const char *fmt, ...)
 {
 	va_list args;
@@ -521,7 +538,7 @@ warnx(const char *fmt, ...)
 	va_end(args);
 }
 
-void
+static void
 vwarn(const char *fmt, va_list args)
 {
 	fprintf(stderr, "%s: ", progname);
@@ -532,7 +549,7 @@ vwarn(const char *fmt, va_list args)
 	fprintf(stderr, "%s\n", strerror(errno));
 }
 
-void
+static void
 vwarnx(const char *fmt, va_list args)
 {
 	fprintf(stderr, "%s: ", progname);
