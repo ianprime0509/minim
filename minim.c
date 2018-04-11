@@ -191,9 +191,11 @@ step(void)
 
 	if (isdigit(ch)) {
 		stack_push(&stacks[stack], ch - '0');
+		pc++;
 		return;
 	} else if (isalpha(ch)) {
 		stack_push(&stacks[stack], ch);
+		pc++;
 		return;
 	}
 
@@ -367,7 +369,7 @@ step(void)
 		return;
 	}
 
-	pc += 1;
+	pc++;
 }
 
 static void
@@ -450,7 +452,8 @@ stack_push(struct stack *stack, uint8_t val)
 {
 	if (stack->len == stack->cap) {
 		stack->cap = stack->cap == 0 ? 1 : 2 * stack->cap;
-		stack->data = xrealloc(stack->data, stack->cap);
+		stack->data = xrealloc(stack->data,
+		    stack->cap * sizeof *stack->data);
 	}
 	stack->data[stack->len++] = val;
 }
@@ -473,7 +476,8 @@ call_stack_push(struct call_stack *stack, size_t val)
 {
 	if (stack->len == stack->cap) {
 		stack->cap = stack->cap == 0 ? 1 : 2 * stack->cap;
-		stack->data = xrealloc(stack->data, stack->cap);
+		stack->data = xrealloc(stack->data,
+		    stack->cap * sizeof *stack->data);
 	}
 	stack->data[stack->len++] = val;
 }
