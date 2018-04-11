@@ -1,0 +1,173 @@
+.Dd April 2018
+.Dt MINIM 1
+.Os
+.Sh NAME
+.Nm minim
+.Nd interpret a simple Brainfuck-like language
+.Sh SYNOPSIS
+.Nm
+.Op Fl e Ar eof
+.Op Ar file
+.Sh DESCRIPTION
+.Nm
+is an interpreter for a simple programming language, inspired by Brainfuck but
+centered around the usage of stacks rather than single cells for data storage.
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl e Ar eof
+Set the value to represent the end of input for the
+.Ic \&,
+operator.
+The default value is 0.
+.El
+.Ss LANGUAGE
+The language interpreted by
+.Nm
+consists of single-character operators, in the style of Brainfuck.
+Unlike Brainfuck, which operates on a linear series of
+.Dq cells
+containing a single value,
+.Nm
+expands this concept by providing a linear series of
+.Em stacks ,
+each of which may (at least in theory) store an unlimited number of bytes.
+While Brainfuck implementations typically provide a very large or even
+unlimited number of cells,
+.Nm
+provides only 256 stacks.
+.Pp
+In addition to the stacks,
+.Nm
+also provides 256 registers, each of which may store a single byte.
+The registers may be useful for storing program state that would be much more
+tedious to manage using the stack system.
+.Ss OPERATORS
+Each of the digits
+.Ic 0
+through
+.Ic 9
+acts as an operator which pushes the corresponding numeric value to the current
+stack.
+Each of the letters
+.Ic a
+through
+.Ic z
+and
+.Ic A
+through
+.Ic Z
+acts as an operator which pushes the ASCII numeric value of the character to
+the corresponding stack.
+.Pp
+The binary arithmetic operators
+.Ic + , \- , * , / , % , & , |
+and
+.Ic ^
+have the same meaning as in the C programming language.
+Each operator pops two bytes off the top of the current stack: the one on top
+is used as the right-hand side of the operation, and the one below it is used
+as the left-hand side.
+The result of the operation is pushed onto the current stack.
+.Pp
+The operators used for stack control are the following:
+.Bl -tag -width Ds
+.It Ic _
+Pop a byte off the current stack and discard it.
+.It Ic #
+Pop a byte off the current stack and push it twice (duplicating it).
+.It Ic @
+Pop two bytes off the current stack and push them in the order they were popped
+(swapping them).
+.It Ic >
+Move one stack to the right, or to the first stack if there are no more to the
+right.
+.It Ic <
+Move one stack to the left, or to the last stack if there are no more to the
+left.
+.El
+.Pp
+The operators used for I/O are the following:
+.Bl -tag -width Ds
+.It Ic \&.
+Pop a byte off the current stack and send it (verbatim) to the standard output.
+.It Ic \&,
+Read a single byte from the standard input and push it onto the current stack.
+If the end of the standard input has been reached, the byte pushed is the one
+configured by the
+.Fl e
+option.
+.It Ic \&;
+Pop a byte off the current stack and print its numeric value (as an unsigned
+decimal number) to the standard output, followed by a space.
+.El
+.Pp
+There are two looping constructs in the
+.Nm
+language.
+The first is identical to the loop in Brainfuck: when the operator
+.Ic [
+is encountered, it peeks at the byte at the top of the current stack.
+If the byte is zero, execution continues with the first operator after the
+matching
+.Ic ] ;
+if not, execution continues with the next operator, as usual.
+The operator
+.Ic ]
+jumps back to the corresponding
+.Ic [ .
+The second looping construct is denoted by the
+.Ic {
+and
+.Ic }
+operators, with the contents of the loop being executed as long as the current
+stack is nonempty.
+.Pp
+The value of a register can be set using the
+.Ic =
+operator, which pops two bytes off the current stack.
+The bottom byte is used as the register number, and the top byte is used as the
+value to store in that register.
+The
+.Ic $
+operator pops one byte off the current stack, interprets it as a register
+number, and pushes the value of that register.
+.Pp
+Finally, there are two operations used to denote
+.Dq literals .
+The
+.Ic \&"
+operation looks at the program text up to the next
+.Ic \&"
+and pushes the bytes onto the current stack, starting with the last one.
+It is particularly suited for printing strings: the famous
+.Dq hello, world
+program is written in
+.Nm
+as
+.Ql "hello, world"{.} .
+The
+.Ic \&'
+operation is similar, but interprets the contents of the literal as an unsigned
+decimal number, pushing the (truncated) value to the current stack.
+.Pp
+Any character not corresponding to one of the operators described above will be
+ignored during execution, unless it is inside a literal.
+.Sh EXIT STATUS
+.Ex
+.Sh EXAMPLES
+Print
+.Dq hello, world ,
+followed by a newline (ASCII value 10):
+.Pp
+.Dl '10'"hello, world"{.}
+.Pp
+Alternatively, since there are no restrictions on the characters inside a
+literal:
+.Pp
+.Bd -literal -offset indent -compact
+"hello, world
+"{.}
+.Ed
+.Pp
+.Sh AUTHORS
+.An Ian Johnson Aq Mt ianprime0509@gmail.com
