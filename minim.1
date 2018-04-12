@@ -169,5 +169,23 @@ literal:
 "{.}
 .Ed
 .Pp
+Copy input to output, assuming the default EOF value of 0:
+.Pp
+.Dl ,[.,]
+.Pp
+Print the first 10 Fibonacci numbers:
+.Pp
+.Bd -literal -offset indent -compact
+i'10'2-=        0[ Set up a counter. ]_
+01
+i$[             0[ Main loop. ]_
+    1-i@=       0[ Store decremented counter. ]_
+    b@=a@=a$b$  0[ Put top two elements in registers a and b. ]_
+    a$b$+       0[ Put next Fibonacci number on top. ]_
+i$]_
+{t@= >t$<}      0[ Reverse the sequence in the next stack over. ]_
+>{;}            0[ Output results. ]_
+.Ed
+.Pp
 .Sh AUTHORS
 .An Ian Johnson Aq Mt ianprime0509@gmail.com
